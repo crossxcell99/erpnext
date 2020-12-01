@@ -25,14 +25,17 @@ def get_mappers_from_db():
 
 
 def get_accounts_in_mappers(mapping_names):
-	return frappe.db.sql('''
+	_names = ', '.join(['"%s"' % d for d in mapping_names])
+	m_names = '('+ _names + ')' if _names else '("")'
+	query = '''
 		select cfma.name, cfm.label, cfm.is_working_capital, cfm.is_income_tax_liability,
 		cfm.is_income_tax_expense, cfm.is_finance_cost, cfm.is_finance_cost_adjustment
 		from `tabCash Flow Mapping Accounts` cfma
 		join `tabCash Flow Mapping` cfm on cfma.parent=cfm.name
-		where cfma.parent in (%s)
+		where cfma.parent in %s
 		order by cfm.is_working_capital
-	''', (', '.join(['"%s"' % d for d in mapping_names])))
+	''' % m_names
+	return frappe.db.sql(query)
 
 
 def setup_mappers(mappers):
@@ -170,12 +173,12 @@ def add_data_for_operating_activities(
 		data.append(profit_data)
 		section_data.append(profit_data)
 
-		data.append({
-			"account_name": mapper["section_leader"],
-			"parent_account": None,
-			"indent": 1.0,
-			"account": mapper["section_leader"]
-		})
+		# data.append({
+		# 	"account_name": mapper["section_leader"],
+		# 	"parent_account": None,
+		# 	"indent": 1.0,
+		# 	"account": mapper["section_leader"]
+		# })
 
 	for account in mapper['account_types']:
 		if account['is_working_capital'] and not has_added_working_capital_header:
@@ -206,8 +209,8 @@ def add_data_for_operating_activities(
 			data.append(account_data)
 			section_data.append(account_data)
 
-	_add_total_row_account(
-		data, section_data, mapper['section_subtotal'], period_list, company_currency, indent=1)
+	# _add_total_row_account(
+	# 	data, section_data, mapper['section_subtotal'], period_list, company_currency, indent=1)
 
 	# calculate adjustment for tax paid and add to data
 	if not mapper['tax_liabilities']:
@@ -377,6 +380,7 @@ def _get_account_type_based_data(filters, account_names, period_list, accumulate
 	for period in period_list:
 		start_date = get_start_date(period, accumulated_values, company)
 		accounts = ', '.join(['"%s"' % d for d in account_names])
+		accounts = '('+ accounts + ')' if accounts else '("")'
 
 		if opening_balances:
 			date_info = dict(date=start_date)
@@ -398,19 +402,19 @@ def _get_account_type_based_data(filters, account_names, period_list, accumulate
 				from `tabGL Entry`
 				where company=%s and posting_date >= %s and posting_date <= %s 
 					and voucher_type != 'Period Closing Voucher'
-					and account in ( SELECT name FROM tabAccount WHERE name IN (%s)
-					OR parent_account IN (%s))
-			""", (company, start, end, accounts, accounts))
+					and account in ( SELECT name FROM tabAccount WHERE name IN {accounts}
+					OR parent_account IN {accounts})
+			""".format(accounts=accounts), (company, start, end))
 		else:
 			gl_sum = frappe.db.sql_list("""
 				select sum(credit) - sum(debit)
 				from `tabGL Entry`
 				where company=%s and posting_date >= %s and posting_date <= %s 
 					and voucher_type != 'Period Closing Voucher'
-					and account in ( SELECT name FROM tabAccount WHERE name IN (%s)
-					OR parent_account IN (%s))
-			""", (company, start_date if accumulated_values else period['from_date'],
-				period['to_date'], accounts, accounts))
+					and account in ( SELECT name FROM tabAccount WHERE name IN {accounts}
+					OR parent_account IN {accounts})
+			""".format(accounts=accounts), (company, start_date if accumulated_values else period['from_date'],
+				period['to_date']))
 
 		if gl_sum and gl_sum[0]:
 			amount = gl_sum[0]
